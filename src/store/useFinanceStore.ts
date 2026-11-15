@@ -211,9 +211,6 @@ export const useFinanceStore = create<FinanceStore>((set, get) => ({
 
     try {
       await persistTransactionScope(getSqliteClient(), id, scope);
-      set(state => ({
-        transactions: state.transactions.map(tx => tx.id === id ? { ...tx } : tx),
-      }));
     } catch (error) {
       set(state => ({
         error: error instanceof Error ? error.message : String(error),

@@ -17,7 +17,6 @@ import {
 } from '../../db/analyticsQueries';
 import {
   getSpendingImpact,
-  isPersonalTransferCredit,
   isSpendingCredit,
   isSpendingCategory,
   isSpendingOffset,
@@ -92,34 +91,25 @@ export function OverviewDashboard({ onNavigateToReview }: { onNavigateToReview?:
   const [analyticsResult, setAnalyticsResult] = useState<{
     month: string;
     scope: TransactionScope | 'all';
-    transactions: ParsedTransaction[];
     outflows: OutflowTransaction[];
     merchants: MerchantSpend[];
     burnSplit: BurnSplit;
     error?: string;
   } | null>(null);
-  const analyticsLoading =
-    analyticsResult?.month !== displayedMonth ||
-    analyticsResult.scope !== selectedScope ||
-    analyticsResult.transactions !== transactions;
+  const hasAnalyticsForSelection = analyticsResult?.month === displayedMonth &&
+    analyticsResult.scope === selectedScope;
+  const analyticsLoading = !hasAnalyticsForSelection;
   const analyticsError = analyticsResult?.month === displayedMonth &&
-    analyticsResult.scope === selectedScope &&
-    analyticsResult.transactions === transactions
+    analyticsResult.scope === selectedScope
     ? analyticsResult.error
     : null;
-  const topOutflows = analyticsResult?.month === displayedMonth &&
-    analyticsResult.scope === selectedScope &&
-    analyticsResult.transactions === transactions
+  const topOutflows = hasAnalyticsForSelection
     ? analyticsResult.outflows
     : [];
-  const topMerchants = analyticsResult?.month === displayedMonth &&
-    analyticsResult.scope === selectedScope &&
-    analyticsResult.transactions === transactions
+  const topMerchants = hasAnalyticsForSelection
     ? analyticsResult.merchants
     : [];
-  const burnSplit = analyticsResult?.month === displayedMonth &&
-    analyticsResult.scope === selectedScope &&
-    analyticsResult.transactions === transactions
+  const burnSplit = hasAnalyticsForSelection
     ? analyticsResult.burnSplit
     : null;
 
@@ -137,7 +127,6 @@ export function OverviewDashboard({ onNavigateToReview }: { onNavigateToReview?:
         setAnalyticsResult({
           month: displayedMonth,
           scope: selectedScope,
-          transactions,
           outflows,
           merchants,
           burnSplit: split,
@@ -149,7 +138,6 @@ export function OverviewDashboard({ onNavigateToReview }: { onNavigateToReview?:
         setAnalyticsResult({
           month: displayedMonth,
           scope: selectedScope,
-          transactions,
           outflows: [],
           merchants: [],
           burnSplit: { fixed: 0, discretionary: 0 },
@@ -174,15 +162,19 @@ export function OverviewDashboard({ onNavigateToReview }: { onNavigateToReview?:
   const metrics = useMemo(() => {
     const reviewItems = filteredTransactions.filter(tx => tx.needsUserReview);
 
-    const personalTransferCredits = filteredTransactions
-      .filter(isPersonalTransferCredit)
-      .reduce((sum, tx) => sum + tx.amount, 0);
-    const totalSpends = categorySpending.data.reduce((sum, category) => sum + category.amount, 0) -
-      personalTransferCredits;
+    const totalSpends = categorySpending.data.reduce((sum, category) => sum + category.amount, 0);
 
     const totalInternalTransfers = filteredTransactions
       .filter(isInternalTransfer)
       .reduce((sum, tx) => sum + tx.amount, 0);
+
+    const personalTransferTransactions = filteredTransactions.filter(
+      tx => tx.category === 'Personal Transfer'
+    );
+
+    const investmentTransactions = filteredTransactions.filter(
+      tx => tx.category === 'Investments & Savings' && tx.flowType === 'EXPENSE'
+    );
 
     const expenseCount = filteredTransactions.filter(tx =>
       tx.flowType === 'EXPENSE' && isSpendingCategory(tx.category)
@@ -194,6 +186,10 @@ export function OverviewDashboard({ onNavigateToReview }: { onNavigateToReview?:
     return {
       totalSpends,
       totalInternalTransfers,
+      totalPersonalTransfers: personalTransferTransactions.reduce((sum, tx) => sum + tx.amount, 0),
+      personalTransferCount: personalTransferTransactions.length,
+      totalInvestments: investmentTransactions.reduce((sum, tx) => sum + tx.amount, 0),
+      investmentCount: investmentTransactions.length,
       spendAdjustments,
       reviewCount: reviewItems.length,
       expenseCount,
@@ -259,7 +255,7 @@ export function OverviewDashboard({ onNavigateToReview }: { onNavigateToReview?:
       </div>
 
       {/* Metric Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         {/* Total Spends (clickable) */}
         <button
           onClick={() => setSelectedCategory('ALL_SPENDS')}
@@ -297,6 +293,44 @@ export function OverviewDashboard({ onNavigateToReview }: { onNavigateToReview?:
               <p className="text-xs text-gray-400 mt-2">Not counted in spends</p>
             </div>
             <TrendingUp size={40} className="text-gray-500 opacity-50" />
+          </div>
+        </button>
+
+        {/* Personal Transfers (clickable) */}
+        <button
+          onClick={() => setSelectedCategory('Personal Transfer')}
+          className="bg-gradient-to-br from-violet-900 to-violet-800 border border-violet-700 rounded-lg p-6 text-left cursor-pointer hover:border-violet-500/50 hover:bg-violet-500/10 transition-all"
+        >
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-violet-200 text-sm font-medium">Personal Transfers</p>
+              <p className="text-3xl font-bold text-white mt-2">
+                {formatCurrency(metrics.totalPersonalTransfers)}
+              </p>
+              <p className="text-xs text-violet-300 mt-2">
+                {metrics.personalTransferCount} transactions
+              </p>
+              <p className="text-xs text-violet-300 mt-1">Excluded from monthly spend</p>
+            </div>
+            <TrendingUp size={40} className="text-violet-400 opacity-50" />
+          </div>
+        </button>
+
+        {/* Investments & Savings (clickable) */}
+        <button
+          onClick={() => setSelectedCategory('Investments & Savings')}
+          className="bg-gradient-to-br from-teal-900 to-teal-800 border border-teal-700 rounded-lg p-6 text-left cursor-pointer hover:border-teal-500/50 hover:bg-teal-500/10 transition-all"
+        >
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-teal-200 text-sm font-medium">Investments &amp; Savings</p>
+              <p className="text-3xl font-bold text-white mt-2">
+                {formatCurrency(metrics.totalInvestments)}
+              </p>
+              <p className="text-xs text-teal-300 mt-2">{metrics.investmentCount} transactions</p>
+              <p className="text-xs text-teal-300 mt-1">Excluded from monthly spend</p>
+            </div>
+            <TrendingUp size={40} className="text-teal-400 opacity-50" />
           </div>
         </button>
 
@@ -452,44 +486,6 @@ export function OverviewDashboard({ onNavigateToReview }: { onNavigateToReview?:
         ) : null}
       </section>
 
-      <section className="overflow-hidden rounded-lg border border-gray-800 bg-gray-900">
-        <div className="border-b border-gray-800 px-6 py-4">
-          <h3 className="text-lg font-semibold text-white">Transactions</h3>
-          <p className="mt-1 text-sm text-gray-400">
-            {filteredTransactions.length} transactions · Edit category and scope inline
-          </p>
-        </div>
-        {filteredTransactions.length === 0 ? (
-          <div className="p-6 text-sm text-gray-400">No transactions for this month.</div>
-        ) : (
-          <div className="max-h-[560px] overflow-auto">
-            <table className="w-full text-sm">
-              <thead className="sticky top-0 z-10 bg-gray-800">
-                <tr className="text-left text-xs font-semibold text-gray-300">
-                  <th className="px-3 py-3">Date</th>
-                  <th className="px-3 py-3">Payee</th>
-                  <th className="px-3 py-3 text-right">Amount</th>
-                  <th className="px-3 py-3">Category</th>
-                  <th className="px-3 py-3">Scope</th>
-                </tr>
-              </thead>
-              <tbody>
-                {[...filteredTransactions]
-                  .sort((a, b) => new Date(b.transactionDate).getTime() - new Date(a.transactionDate).getTime())
-                  .map(transaction => (
-                    <TransactionRow
-                      key={transaction.id}
-                      transaction={transaction}
-                      onCategoryChange={updateTransactionCategoryInline}
-                      onScopeChange={updateTransactionScope}
-                    />
-                  ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div>
@@ -586,6 +582,9 @@ export function OverviewDashboard({ onNavigateToReview }: { onNavigateToReview?:
                       return isInternalTransfer(tx);
                     }
                     if (selectedCategory === 'Personal Transfer') return tx.category === selectedCategory;
+                    if (selectedCategory === 'Investments & Savings') {
+                      return tx.category === selectedCategory;
+                    }
                     if (categorySpending.data.some(category => category.id === selectedCategory)) {
                       return (
                         (tx.flowType === 'EXPENSE' ||
@@ -600,27 +599,13 @@ export function OverviewDashboard({ onNavigateToReview }: { onNavigateToReview?:
                       tx.category === selectedCategory;
                   })
                   .sort((a, b) => new Date(b.transactionDate).getTime() - new Date(a.transactionDate).getTime())
-                  .map(tx => (
-                    <tr key={tx.id} className="border-b border-gray-800 hover:bg-gray-800">
-                      <td className="px-3 py-2 text-gray-300">{new Date(tx.transactionDate).toLocaleDateString('en-IN')}</td>
-                      <td className="px-3 py-2 text-gray-300 max-w-xs truncate">{tx.cleanPartyName}</td>
-                      <td className={`px-3 py-2 text-right font-mono ${getSpendingImpact(tx) < 0 ? 'text-green-300' : 'text-gray-300'}`}>
-                        {getSpendingImpact(tx) < 0 ? '−' : ''}
-                        ₹{tx.amount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
-                      </td>
-                      <td className="px-3 py-2 text-gray-300">{tx.category}</td>
-                      <td className="px-3 py-2">
-                        <span className={`inline-flex rounded-full px-2 py-0.5 text-xs ${
-                          tx.scope === 'home'
-                            ? 'bg-emerald-950 text-emerald-200'
-                            : 'bg-slate-800 text-slate-200'
-                        }`}>
-                          {tx.scope === 'home' ? '🏠 Home' : '👤 Self'}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2 text-gray-300">{tx.sourceType}</td>
-                      <td className="px-3 py-2 text-gray-300">{tx.utrReference || '-'}</td>
-                    </tr>
+                  .map(transaction => (
+                    <TransactionRow
+                      key={transaction.id}
+                      transaction={transaction}
+                      onCategoryChange={updateTransactionCategoryInline}
+                      onScopeChange={updateTransactionScope}
+                    />
                   ))}
               </tbody>
             </table>

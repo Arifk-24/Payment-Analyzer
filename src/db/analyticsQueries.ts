@@ -72,9 +72,9 @@ function validateLimit(limit: number): void {
 }
 
 const MONTH_FILTER = `transaction_date LIKE ?`;
-const NON_TRANSFER_EXPENSE_FILTER = `
+const NON_SPENDING_EXPENSE_FILTER = `
   flow_type = 'EXPENSE'
-  AND LOWER(COALESCE(category, '')) != 'internal transfer'
+  AND LOWER(COALESCE(category, '')) NOT IN ('internal transfer', 'investments & savings')
 `;
 const MERCHANT_KEY_SQL = `COALESCE(
   (
@@ -118,7 +118,7 @@ export async function getMonthlyCategorySpending(
       FROM transactions
       WHERE transaction_date LIKE ?
         AND COALESCE(NULLIF(category, ''), 'Uncategorized')
-          NOT IN ('Personal Transfer', 'Internal Transfer', 'Salary & Income')
+          NOT IN ('Personal Transfer', 'Internal Transfer', 'Investments & Savings', 'Salary & Income')
         AND flow_type IN ('EXPENSE', 'INCOME')
         AND (? = 'all' OR scope = ?)
       GROUP BY COALESCE(NULLIF(category, ''), 'Uncategorized')
@@ -150,8 +150,8 @@ export async function getTopOutflows(
         category
       FROM transactions
       WHERE ${MONTH_FILTER}
-        AND ${NON_TRANSFER_EXPENSE_FILTER}
-        AND COALESCE(category, 'Uncategorized') NOT IN ('Personal Transfer', 'Salary & Income')
+        AND ${NON_SPENDING_EXPENSE_FILTER}
+        AND COALESCE(category, 'Uncategorized') NOT IN ('Personal Transfer', 'Investments & Savings', 'Salary & Income')
         AND ${scopeFilterSql()}
         AND LOWER(COALESCE(category, '')) != 'rent'
         AND INSTR(
@@ -185,8 +185,8 @@ export async function getSpendByMerchant(
       expenses AS (
         SELECT merchant, SUM(amount) AS totalSpent, COUNT(*) AS transactionCount
         FROM monthly_transactions
-        WHERE ${NON_TRANSFER_EXPENSE_FILTER}
-          AND COALESCE(category, 'Uncategorized') NOT IN ('Personal Transfer', 'Salary & Income')
+        WHERE ${NON_SPENDING_EXPENSE_FILTER}
+          AND COALESCE(category, 'Uncategorized') NOT IN ('Personal Transfer', 'Investments & Savings', 'Salary & Income')
         GROUP BY merchant
       )
       SELECT
@@ -221,7 +221,7 @@ export async function getBurnSplit(
         FROM monthly_transactions
         WHERE flow_type IN ('EXPENSE', 'INCOME')
           AND COALESCE(NULLIF(category, ''), 'Uncategorized')
-            NOT IN ('Personal Transfer', 'Internal Transfer', 'Salary & Income')
+            NOT IN ('Personal Transfer', 'Internal Transfer', 'Investments & Savings', 'Salary & Income')
       )
       SELECT
         COALESCE(SUM(

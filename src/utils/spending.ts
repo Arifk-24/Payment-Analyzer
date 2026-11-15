@@ -5,6 +5,7 @@ export function isSpendingCategory(category: string | null | undefined): boolean
     category &&
       category !== 'Personal Transfer' &&
       category !== 'Internal Transfer' &&
+    category !== 'Investments & Savings' &&
       category !== 'Salary & Income'
   );
 }
@@ -20,20 +21,13 @@ export function isSpendingCredit(
     transaction.category !== 'Uncategorized';
 }
 
-export function isPersonalTransferCredit(
-  transaction: Pick<ParsedTransaction, 'flowType' | 'category'>
-): boolean {
-  return transaction.flowType === 'INCOME' && transaction.category === 'Personal Transfer';
-}
-
 export function isSpendingOffset(
   transaction: Pick<
     ParsedTransaction,
     'flowType' | 'category'
   >
 ): boolean {
-  return isPersonalTransferCredit(transaction) ||
-    isSpendingCredit(transaction);
+  return isSpendingCredit(transaction);
 }
 
 export function getSpendingImpact(
@@ -42,7 +36,6 @@ export function getSpendingImpact(
     'flowType' | 'category' | 'amount'
   >
 ): number {
-  if (isPersonalTransferCredit(transaction)) return -transaction.amount;
   if (!isSpendingCategory(transaction.category)) return 0;
   if (transaction.flowType === 'EXPENSE') return transaction.amount;
   if (isSpendingCredit(transaction)) return -transaction.amount;
@@ -53,6 +46,6 @@ export function spendingCreditSql(alias = ''): string {
   const prefix = alias ? `${alias}.` : '';
   return `(
     ${prefix}flow_type = 'INCOME'
-    AND ${prefix}category NOT IN ('Personal Transfer', 'Internal Transfer', 'Salary & Income', 'Uncategorized')
+    AND ${prefix}category NOT IN ('Personal Transfer', 'Internal Transfer', 'Investments & Savings', 'Salary & Income', 'Uncategorized')
   )`;
 }

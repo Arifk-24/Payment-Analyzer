@@ -6,7 +6,6 @@ import { getMonthlyCategorySpending, type AnalyticsDatabase } from '../db/analyt
 interface CategorySpendingResult {
   month: string;
   scope: TransactionScope | 'all';
-  refreshToken?: object;
   data: CategorySpend[];
   error: string | null;
 }
@@ -56,7 +55,6 @@ const CATEGORY_GROUPS: Array<{
       'Shopping',
       'Entertainment & Weekend Activities',
       'Digital Subscriptions & SaaS',
-      'Investments & Savings',
     ],
   },
   {
@@ -86,9 +84,9 @@ export function useCategorySpending(
   refreshToken?: object
 ): { data: CategorySpend[]; loading: boolean; error: string | null } {
   const [result, setResult] = useState<CategorySpendingResult | null>(null);
-  const loading = result?.month !== selectedMonth ||
-    result.scope !== selectedScope ||
-    result.refreshToken !== refreshToken;
+  const hasSelectionResult = result?.month === selectedMonth &&
+    result.scope === selectedScope;
+  const loading = !hasSelectionResult;
 
   useEffect(() => {
     let isCurrent = true;
@@ -113,14 +111,13 @@ export function useCategorySpending(
             color: group.color,
           }))
           .filter(category => category.amount > 0);
-        setResult({ month: selectedMonth, scope: selectedScope, refreshToken, data, error: null });
+        setResult({ month: selectedMonth, scope: selectedScope, data, error: null });
       })
       .catch((error: unknown) => {
         if (!isCurrent) return;
         setResult({
           month: selectedMonth,
           scope: selectedScope,
-          refreshToken,
           data: [],
           error: error instanceof Error ? error.message : String(error),
         });
@@ -131,12 +128,9 @@ export function useCategorySpending(
     };
   }, [db, selectedMonth, selectedScope, refreshToken]);
 
-  const isCurrentResult = result?.month === selectedMonth &&
-    result.scope === selectedScope &&
-    result.refreshToken === refreshToken;
   return {
-    data: isCurrentResult ? result.data : [],
+    data: hasSelectionResult ? result.data : [],
     loading,
-    error: isCurrentResult ? result.error : null,
+    error: hasSelectionResult ? result.error : null,
   };
 }

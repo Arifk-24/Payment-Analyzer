@@ -47,6 +47,43 @@ interface SQLiteDatabase {
 let db: any;
 let initPromise: Promise<void> | null = null;
 
+function investmentFlowTypeSql(
+  rawDescriptionExpression = 'raw_description',
+  currentFlowTypeExpression = 'flow_type'
+): string {
+  const description = `UPPER(COALESCE(${rawDescriptionExpression}, ''))`;
+  return `CASE
+    WHEN ${description} LIKE '%REDEMPTION%'
+      OR ${description} LIKE '%REDEEM%'
+      OR ${description} LIKE '%DIVIDEND%'
+      OR ${description} LIKE '%INTEREST%'
+      OR ${description} LIKE '%MATURITY%'
+      OR ${description} LIKE '%MATURED%'
+      OR ${description} LIKE '%SOLD%'
+      OR ${description} LIKE '%SELL%'
+    THEN 'INCOME'
+    WHEN ${description} LIKE '%SIP%'
+      OR ${description} LIKE '%PURCHASE%'
+      OR ${description} LIKE '%DEBIT%'
+      OR ${description} LIKE '%PAID TO%'
+      OR ${description} LIKE '%NACH%'
+      OR ${description} LIKE '%AUTODEBIT%'
+      OR ${description} LIKE '%BOUGHT%'
+    THEN 'EXPENSE'
+    WHEN ${description} LIKE '%CREDIT%'
+      OR ${description} LIKE '%RECEIVED%'
+      OR ${description} LIKE '%CREDITED%'
+      OR ${description} LIKE '%INCOME%'
+      OR ${description} LIKE '%REFUND%'
+      OR ${description} LIKE '%REFUNDED%'
+      OR ${description} LIKE '%REVERSAL%'
+    THEN 'INCOME'
+    WHEN ${currentFlowTypeExpression} IN ('EXPENSE', 'INCOME')
+    THEN ${currentFlowTypeExpression}
+    ELSE 'EXPENSE'
+  END`;
+}
+
 async function ensureDatabaseInitialized() {
   if (!initPromise) {
     initPromise = initializeDatabase();
@@ -90,8 +127,8 @@ async function initializeDatabase(resetExisting = false) {
       try {
         await (navigator as any).storage.getDirectory();
         const databaseName = resetExisting
-          ? 'file:payment-analyser.db?delete-before-open=1'
-          : 'payment-analyser.db';
+          ? '/payment-analyser.db?delete-before-open=1'
+          : '/payment-analyser.db';
         db = new sqlite3.oo1.OpfsDb(databaseName, 'c');
         console.log('[SQLite] Opened persistent OPFS database:', db.filename);
       } catch (opfsErr) {
@@ -109,6 +146,9 @@ async function initializeDatabase(resetExisting = false) {
 
     // Run migrations
     await runMigrations();
+
+    const count = executeQuery('SELECT COUNT(*) as count FROM transactions')[0]?.count ?? 0;
+    console.log(`[SQLite Worker] Persistence verified. Stored transactions on boot: ${count}`);
   } catch (error) {
     console.error('[SQLite] Initialization failed:', error);
     throw error;
@@ -119,6 +159,11 @@ async function initializeDatabase(resetExisting = false) {
  * Run table setup migrations
  */
 async function runMigrations() {
+  const txCountRow = executeQuery(
+    "SELECT count(*) as count FROM sqlite_master WHERE type='table' AND name='transactions'"
+  );
+  const tableExists = (txCountRow[0]?.count ?? 0) > 0;
+
   const migrations = [
     `
     CREATE TABLE IF NOT EXISTS transactions (
@@ -226,7 +271,8 @@ async function runMigrations() {
   seedDefaultMerchantRules(db);
   migrateLegacyPayeeRules(db);
   seedDescriptionCategoryRules(db);
-  db.exec(`
+  if (!tableExists) {
+    db.exec(`
     UPDATE transactions
     SET category = COALESCE(
           (
@@ -378,7 +424,7 @@ async function runMigrations() {
         )
       )
   `);
-  db.exec(`
+    db.exec(`
     UPDATE transactions
     SET category = CASE
           WHEN category != 'Internal Transfer' THEN category
@@ -423,7 +469,7 @@ async function runMigrations() {
       )
       AND COALESCE(classification_reason, '') NOT IN ('User batch review', 'User manual override')
   `);
-  db.exec(`
+    db.exec(`
     UPDATE transactions
     SET flow_type = CASE
       WHEN UPPER(raw_description) LIKE '%PAID TO ' || UPPER(COALESCE(clean_party_name, '')) || '%'
@@ -447,6 +493,8 @@ async function runMigrations() {
         OR (flow_type = 'EXPENSE' AND UPPER(raw_description) LIKE '%RECEIVED FROM ' || UPPER(COALESCE(clean_party_name, '')) || '%')
       )
   `);
+  }
+
   db.exec('DROP INDEX IF EXISTS idx_tx_review');
   db.exec('CREATE INDEX idx_tx_review ON transactions(requires_review)');
   db.exec('DROP INDEX IF EXISTS idx_tx_dedupe_fingerprint');
@@ -516,13 +564,21 @@ async function runMigrations() {
     // ignore as older SQLite builds may not support dropping columns
   }
 
-  const pendingClassificationIds = executeQuery(
-    `SELECT id FROM transactions
-     WHERE requires_review = 1
-        OR category = 'Uncategorized'
-        OR classification_reason = 'Unmapped transaction of ₹150 or less'`
-  ).map((row: { id: string }) => row.id);
-  autoCategorizeBatch(db, pendingClassificationIds);
+  if (!tableExists) {
+    const pendingClassificationIds = executeQuery(
+      `SELECT id FROM transactions
+       WHERE requires_review = 1
+          OR category = 'Uncategorized'
+          OR classification_reason = 'Unmapped transaction of ₹150 or less'`
+    ).map((row: { id: string }) => row.id);
+    autoCategorizeBatch(db, pendingClassificationIds);
+  }
+
+  db.exec(`
+    UPDATE transactions
+    SET flow_type = ${investmentFlowTypeSql()}
+    WHERE category = 'Investments & Savings'
+  `);
 }
 
 function seedDefaultMerchantRules(database: SQLiteDatabase) {
@@ -552,7 +608,17 @@ function seedDefaultMerchantRules(database: SQLiteDatabase) {
       ('JIO', 'Bills & Utilities'),
       ('BESCOM', 'Bills & Utilities'),
       ('TSSPDCL', 'Bills & Utilities'),
-      ('BSNL', 'Bills & Utilities')
+      ('BSNL', 'Bills & Utilities'),
+      ('ZERODHA', 'Investments & Savings'),
+      ('GROWW', 'Investments & Savings'),
+      ('KUVERA', 'Investments & Savings'),
+      ('COIN BY ZERODHA', 'Investments & Savings'),
+      ('INDIAN CLEARING CORP', 'Investments & Savings'),
+      ('ICCL', 'Investments & Savings'),
+      ('CDSL', 'Investments & Savings'),
+      ('NSDL', 'Investments & Savings'),
+      ('NSE', 'Investments & Savings'),
+      ('BSE', 'Investments & Savings')
   `);
 }
 
@@ -562,6 +628,8 @@ function migrateLegacyPayeeRules(database: SQLiteDatabase) {
     'BLINKIT', 'ZEPTO', 'INSTAMART', 'BIGBASKET', 'DMART', 'AMAZON',
     'FLIPKART', 'MYNTRA', 'AJIO', 'UBER', 'OLA', 'RAPIDO', 'IRCTC',
     'REDBUS', 'AIRTEL', 'JIO', 'BESCOM', 'TSSPDCL', 'BSNL',
+    'ZERODHA', 'GROWW', 'KUVERA', 'COIN BY ZERODHA', 'INDIAN CLEARING CORP',
+    'ICCL', 'CDSL', 'NSDL', 'NSE', 'BSE',
   ];
   const placeholders = builtInPatterns.map(() => '?').join(', ');
   const customRules = executeQuery(
@@ -602,6 +670,9 @@ function migrateLegacyPayeeRules(database: SQLiteDatabase) {
 function seedDescriptionCategoryRules(database: SQLiteDatabase) {
   database.exec(`
     INSERT OR IGNORE INTO description_category_rules (keyword, category, priority) VALUES
+      ('SIP', 'Investments & Savings', 8),
+      ('MUTUAL FUND', 'Investments & Savings', 9),
+      ('ZERODHA', 'Investments & Savings', 9),
       ('RENT', 'Bills & Utilities', 10),
       ('WI-FI', 'Bills & Utilities', 10),
       ('WIFI', 'Bills & Utilities', 10),
@@ -790,6 +861,8 @@ function autoCategorizeBatch(database: SQLiteDatabase, transactionIds: string[])
           THEN 'INCOME'
           ELSE 'EXPENSE'
         END
+      WHEN classified.matched_category = 'Investments & Savings'
+        THEN ${investmentFlowTypeSql('classified.raw_description', 'classified.flow_type')}
       WHEN classified.flow_type = 'INTERNAL_TRANSFER' AND classified.matched_category IS NOT NULL
         THEN CASE
           WHEN UPPER(classified.raw_description) LIKE '%CREDIT%'
@@ -906,6 +979,7 @@ function applyBatchReviews(database: SQLiteDatabase, reviews: ReviewDecision[]):
             WHEN ? = 'Internal Transfer' THEN 'INTERNAL_TRANSFER'
             WHEN ? = 'Salary & Income' THEN 'INCOME'
             WHEN ? = 'Personal Transfer' THEN flow_type
+            WHEN ? = 'Investments & Savings' THEN ${investmentFlowTypeSql()}
             WHEN flow_type = 'INTERNAL_TRANSFER' THEN
               CASE
                 WHEN UPPER(raw_description) LIKE '%CREDIT%'
@@ -934,6 +1008,7 @@ function applyBatchReviews(database: SQLiteDatabase, reviews: ReviewDecision[]):
             WHEN ? = 'Internal Transfer' THEN 'INTERNAL_TRANSFER'
             WHEN ? = 'Salary & Income' THEN 'INCOME'
             WHEN ? = 'Personal Transfer' THEN flow_type
+            WHEN ? = 'Investments & Savings' THEN ${investmentFlowTypeSql()}
             WHEN flow_type = 'INTERNAL_TRANSFER' THEN
               CASE
                 WHEN UPPER(raw_description) LIKE '%CREDIT%'
@@ -959,12 +1034,13 @@ function applyBatchReviews(database: SQLiteDatabase, reviews: ReviewDecision[]):
         saveRule.bind([payeeName, category, scope]);
         saveRule.step();
         saveRule.reset();
-        updatePayee.bind([category, scope, category, category, category, payeeName]);
+        updatePayee.bind([category, scope, category, category, category, category, payeeName]);
         updatePayee.step();
         updatePayee.reset();
       }
       for (const review of transactionReviews) {
         updateTransaction.bind([
+          review.category,
           review.category,
           review.category,
           review.category,

@@ -121,6 +121,8 @@ export function TransactionRow({
         </button>
         {error && <p className="mt-1 max-w-40 text-xs text-red-300">{error}</p>}
       </td>
+      <td className="px-3 py-2 text-gray-300">{transaction.sourceType}</td>
+      <td className="px-3 py-2 text-gray-300">{transaction.utrReference || '-'}</td>
     </tr>
   );
 }

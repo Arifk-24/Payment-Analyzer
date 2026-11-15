@@ -10,8 +10,8 @@ import { parseCreditCardStatement } from '../parsers/creditCardParser';
 import { classifyTransaction } from '../heuristics/classifier';
 import type { MerchantRule } from '../../types/finance';
 
-// Set up the worker
-pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+// Set up the local worker to avoid cross-origin requests under COEP.
+pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
 
 export interface PDFExtractionResult {
   success: boolean;
